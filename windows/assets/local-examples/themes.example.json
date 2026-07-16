@@ -1,0 +1,23 @@
+[
+  {
+    "id": "my-local-image",
+    "label": "My Local Image",
+    "description": "A private image theme stored only on this computer",
+    "family": "Image · Local",
+    "scheme": "dark",
+    "swatch": "linear-gradient(145deg,#101018,#6f82c6 55%,#f0bd89)",
+    "background": "radial-gradient(circle at 88% 6%,rgba(151,184,255,.25),transparent 28%),linear-gradient(145deg,#0e101b 0%,#1c2034 56%,#141721 100%)",
+    "sidebar": "linear-gradient(180deg,rgba(13,15,26,.99),rgba(22,26,42,.98))",
+    "main": "linear-gradient(145deg,rgba(24,28,45,.99),rgba(14,17,28,.99))",
+    "surface": "rgba(37,43,66,.91)",
+    "text": "#f5f7ff",
+    "muted": "#b3bbd4",
+    "border": "rgba(162,179,234,.31)",
+    "accent": "#9db4ff",
+    "accentStrong": "#eead77",
+    "glow": "rgba(120,148,255,.23)",
+    "image": "my-local-image.png",
+    "secondaryImage": "my-local-sidebar-image.png",
+    "imageMode": "portrait"
+  }
+]

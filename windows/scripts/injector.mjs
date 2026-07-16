@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { BUILT_IN_THEMES, buildGenericThemeCss, buildImageThemeCss } from "../assets/theme-catalog.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -26,6 +27,7 @@ function parseArgs(argv) {
     else if (arg === "--watch") options.mode = "watch";
     else if (arg === "--verify") options.mode = "verify";
     else if (arg === "--remove") options.mode = "remove";
+    else if (arg === "--library") options.mode = "library";
     else if (arg === "--timeout-ms") options.timeoutMs = Number(argv[++i]);
     else if (arg === "--browser-id") options.browserId = argv[++i];
     else if (arg === "--screenshot") options.screenshot = path.resolve(argv[++i]);
@@ -43,7 +45,7 @@ function parseArgs(argv) {
   if (options.browserId !== null && !BROWSER_ID_PATTERN.test(options.browserId)) {
     throw new Error(`Invalid browser ID: ${options.browserId}`);
   }
-  if (["watch", "once", "verify", "remove"].includes(options.mode) && !options.browserId) {
+  if (["watch", "once", "verify", "remove", "library"].includes(options.mode) && !options.browserId) {
     throw new Error(`--browser-id is required in ${options.mode} mode`);
   }
   return options;
@@ -266,16 +268,250 @@ async function connectBrowserIdentityAnchor(port, expectedBrowserId) {
   return new BrowserIdentityAnchor(validatedDebuggerUrl(version, port)).open();
 }
 
-async function loadPayload() {
-  const [css, template, art] = await Promise.all([
+async function loadPayload(autoApply = true) {
+  const [css, template, hero, portrait, moment] = await Promise.all([
     fs.readFile(path.join(root, "assets", "dream-skin.css"), "utf8"),
     fs.readFile(path.join(root, "assets", "renderer-inject.js"), "utf8"),
-    fs.readFile(path.join(root, "assets", "dream-reference.png")),
+    fs.readFile(path.join(root, "assets", "lisiya-hero.png")),
+    fs.readFile(path.join(root, "assets", "lisiya-portrait.png")),
+    fs.readFile(path.join(root, "assets", "lisiya-moment.png")),
   ]);
-  const artDataUrl = `data:image/png;base64,${art.toString("base64")}`;
+  const artDataUrls = [hero, portrait, moment].map(
+    (art) => `data:image/png;base64,${art.toString("base64")}`,
+  );
   return template
     .replace("__DREAM_CSS_JSON__", JSON.stringify(css))
-    .replace("__DREAM_ART_JSON__", JSON.stringify(artDataUrl));
+    .replace("__DREAM_ARTS_JSON__", JSON.stringify(artDataUrls))
+    .replace("__DREAM_AUTO_APPLY__", JSON.stringify(autoApply));
+}
+
+async function loadOptionalPersonalPayload(autoApply = true) {
+  try {
+    return await loadPayload(autoApply);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function loadOptionalLocalImageThemes() {
+  const localRoot = path.join(root, "assets", "local-examples");
+  let definitions;
+  try {
+    definitions = JSON.parse(await fs.readFile(path.join(localRoot, "themes.json"), "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw new Error(`Local image theme catalog is invalid: ${error.message}`);
+  }
+  if (!Array.isArray(definitions)) throw new Error("Local image theme catalog must be an array");
+  const required = ["id", "label", "description", "family", "scheme", "swatch", "background", "sidebar", "main", "surface", "text", "muted", "border", "accent", "accentStrong", "glow", "image", "imageMode"];
+  const loaded = [];
+  for (const theme of definitions) {
+    if (!theme || typeof theme !== "object" || required.some((key) => typeof theme[key] !== "string" || !theme[key].trim())) {
+      throw new Error("A local image theme is missing required metadata");
+    }
+    if (!/^[a-z0-9-]{2,64}$/.test(theme.id) || !/^[a-z0-9-]+\.(?:png|jpe?g|webp)$/i.test(theme.image) ||
+        (theme.secondaryImage && !/^[a-z0-9-]+\.(?:png|jpe?g|webp)$/i.test(theme.secondaryImage))) {
+      throw new Error(`Unsafe local image theme path or ID: ${theme.id}`);
+    }
+    const readDataUrl = async (filename) => {
+      const image = await fs.readFile(path.join(localRoot, filename));
+      const extension = path.extname(filename).toLowerCase();
+      const mime = extension === ".png" ? "image/png" : extension === ".webp" ? "image/webp" : "image/jpeg";
+      return `data:${mime};base64,${image.toString("base64")}`;
+    };
+    const imageDataUrl = await readDataUrl(theme.image);
+    const secondaryDataUrl = theme.secondaryImage ? await readDataUrl(theme.secondaryImage) : null;
+    loaded.push({ ...theme, css: buildImageThemeCss(theme, imageDataUrl, secondaryDataUrl) });
+  }
+  return loaded;
+}
+
+async function loadThemeLibraryPayload() {
+  const registrationPayload = await loadOptionalPersonalPayload(false);
+  const localImageThemes = await loadOptionalLocalImageThemes();
+  const themes = BUILT_IN_THEMES.map(({ id, label, description, family, swatch }) => (
+    { id, label, description, family, swatch }
+  ));
+  if (registrationPayload) {
+    themes.unshift({
+      id: "shiyali",
+      label: "李诗雅 · 晴空",
+      description: "本机个人图片主题",
+      family: "个人 · 本地",
+      swatch: "linear-gradient(145deg, #dff6ff, #94bddd 49%, #6f7fbc)",
+    });
+  }
+  themes.push(...localImageThemes.map(({ id, label, description, family, swatch }) => (
+    { id, label, description, family, swatch }
+  )));
+  const genericCss = Object.fromEntries(BUILT_IN_THEMES.map((theme) => [
+    theme.id,
+    buildGenericThemeCss(theme),
+  ]));
+  for (const theme of localImageThemes) genericCss[theme.id] = theme.css;
+  return `${registrationPayload ? `${registrationPayload};\n` : ""}(() => {
+    const libraryId = "codex-manual-theme-library";
+    const styleId = "codex-manual-theme-library-style";
+    const genericStyleId = "codex-library-generic-theme-style";
+    const positionKey = "codex-manual-theme-library-position-v1";
+    const themes = ${JSON.stringify(themes)};
+    const genericCss = ${JSON.stringify(genericCss)};
+    const existing = document.getElementById(libraryId);
+    if (existing) {
+      existing.remove();
+      document.getElementById(styleId)?.remove();
+    }
+
+    const style = document.createElement("style");
+    style.id = styleId;
+    style.textContent = [
+      "#codex-manual-theme-library { position: fixed; right: 22px; bottom: 118px; z-index: 2147483646; min-width: max-content; font-family: Microsoft YaHei UI, system-ui, sans-serif; color: #25345f; }",
+      "#codex-manual-theme-library .ctl-trigger { border: 1px solid rgba(127,156,211,.60); border-radius: 999px; padding: 9px 14px; background: rgba(251,254,255,.94); box-shadow: 0 8px 26px rgba(54,85,145,.20); color: #3b579b; font-weight: 750; cursor: grab; user-select: none; touch-action: none; }",
+      "#codex-manual-theme-library .ctl-trigger.dragging { cursor: grabbing; box-shadow: 0 12px 30px rgba(54,85,145,.30); }",
+      "#codex-manual-theme-library .ctl-panel { display: none; position: absolute; bottom: 48px; left: 0; width: 372px; max-width: calc(100vw - 44px); max-height: min(620px, calc(100vh - 178px)); overflow: auto; padding: 12px; border: 1px solid rgba(133,164,217,.55); border-radius: 18px; background: rgba(248,252,255,.97); box-shadow: 0 18px 45px rgba(43,75,135,.25); backdrop-filter: blur(16px); }",
+      "#codex-manual-theme-library.open .ctl-panel { display: block; }",
+      "#codex-manual-theme-library .ctl-title { margin: 1px 2px 9px; color: #334d90; font-size: 14px; font-weight: 800; }",
+      "#codex-manual-theme-library .ctl-subtitle { margin: 0 2px 11px; color: #7182aa; font-size: 11px; line-height: 1.5; }",
+      "#codex-manual-theme-library .ctl-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }",
+      "#codex-manual-theme-library .ctl-option { width: 100%; display: flex; gap: 9px; align-items: center; padding: 8px; border: 1px solid rgba(149,176,219,.38); border-radius: 12px; background: white; color: #2e437b; text-align: left; cursor: pointer; }",
+      "#codex-manual-theme-library .ctl-option:hover, #codex-manual-theme-library .ctl-option.active { border-color: rgba(91,126,194,.72); background: linear-gradient(135deg,#f7fcff,#e7f3ff); }",
+      "#codex-manual-theme-library .ctl-swatch { width: 35px; height: 35px; flex: 0 0 auto; border-radius: 10px; }",
+      "#codex-manual-theme-library .ctl-swatch.official { background: linear-gradient(145deg,#25272d,#5f6675); }",
+      "#codex-manual-theme-library .ctl-option b { display: block; font-size: 12px; }",
+      "#codex-manual-theme-library .ctl-option small { display: block; margin-top: 2px; color: #8190b1; font-size: 10px; }",
+      "#codex-manual-theme-library .ctl-option em { display: block; margin-top: 3px; color: #9aa7c4; font-size: 9px; font-style: normal; }",
+      "html.codex-library-generic-theme #codex-manual-theme-library .ctl-option, html.codex-library-generic-theme #codex-manual-theme-library .ctl-option b { color: #2e437b !important; }",
+      "html.codex-library-generic-theme #codex-manual-theme-library .ctl-option small { color: #7182aa !important; }",
+      "html.codex-library-generic-theme #codex-manual-theme-library .ctl-option em { color: #9aa7c4 !important; }",
+      "#codex-manual-theme-library .ctl-reset { margin-top: 9px; }",
+    ].join("");
+    document.head.appendChild(style);
+
+    const library = document.createElement("div");
+    library.id = libraryId;
+    const cards = themes.map((theme) => [
+      '<button class="ctl-option" data-theme="' + theme.id + '">',
+      '<span class="ctl-swatch" style="background:' + theme.swatch + '"></span>',
+      '<span><b>' + theme.label + '</b><small>' + theme.description + '</small><em>' + theme.family + '</em></span>',
+      '</button>',
+    ].join("")).join("");
+    library.innerHTML = [
+      '<div class="ctl-panel">',
+      '<div class="ctl-title">Codex 主题库</div>',
+      '<div class="ctl-subtitle">样板主题只应用到当前窗口；关闭 Codex 后不保留。</div>',
+      '<div class="ctl-options">', cards, '</div>',
+      '<button class="ctl-option ctl-reset" data-theme="official"><span class="ctl-swatch official"></span><span><b>官方外观</b><small>移除当前窗口的自定义皮肤</small></span></button>',
+      '</div><button class="ctl-trigger" type="button">✦ 主题库</button>',
+    ].join("");
+    document.body.appendChild(library);
+
+    const panel = library.querySelector(".ctl-panel");
+    const trigger = library.querySelector(".ctl-trigger");
+    const clamp = (value, minimum, maximum) => Math.min(Math.max(value, minimum), maximum);
+    const placePanel = () => {
+      const triggerRect = trigger.getBoundingClientRect();
+      const panelWidth = Math.min(396, window.innerWidth - 44);
+      panel.style.left = triggerRect.left + panelWidth > window.innerWidth - 12
+        ? Math.round(triggerRect.width - panelWidth) + "px" : "0px";
+    };
+    const moveLibrary = (left, top) => {
+      const triggerRect = trigger.getBoundingClientRect();
+      const nextLeft = clamp(left, 12, window.innerWidth - triggerRect.width - 12);
+      const nextTop = clamp(top, 12, window.innerHeight - triggerRect.height - 12);
+      library.style.right = "auto";
+      library.style.bottom = "auto";
+      library.style.left = Math.round(nextLeft) + "px";
+      library.style.top = Math.round(nextTop) + "px";
+      placePanel();
+      return { left: Math.round(nextLeft), top: Math.round(nextTop) };
+    };
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(positionKey) || "null");
+      if (Number.isFinite(saved?.left) && Number.isFinite(saved?.top)) moveLibrary(saved.left, saved.top);
+    } catch {}
+    let dragState = null;
+    let suppressTriggerClick = false;
+    trigger.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      const rect = trigger.getBoundingClientRect();
+      dragState = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, left: rect.left, top: rect.top, moved: false };
+      try { trigger.setPointerCapture?.(event.pointerId); } catch {}
+      trigger.classList.add("dragging");
+    });
+    trigger.addEventListener("pointermove", (event) => {
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      const offsetX = event.clientX - dragState.startX;
+      const offsetY = event.clientY - dragState.startY;
+      if (Math.abs(offsetX) > 4 || Math.abs(offsetY) > 4) dragState.moved = true;
+      if (!dragState.moved) return;
+      event.preventDefault();
+      moveLibrary(dragState.left + offsetX, dragState.top + offsetY);
+    });
+    const finishDrag = (event) => {
+      if (!dragState || dragState.pointerId !== event.pointerId) return;
+      try { trigger.releasePointerCapture?.(event.pointerId); } catch {}
+      trigger.classList.remove("dragging");
+      if (dragState.moved) {
+        const rect = trigger.getBoundingClientRect();
+        try { window.localStorage.setItem(positionKey, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) })); } catch {}
+        suppressTriggerClick = true;
+        window.setTimeout(() => { suppressTriggerClick = false; }, 0);
+      }
+      dragState = null;
+    };
+    trigger.addEventListener("pointerup", finishDrag);
+    trigger.addEventListener("pointercancel", finishDrag);
+    window.addEventListener("resize", () => {
+      const rect = trigger.getBoundingClientRect();
+      if (library.style.left) moveLibrary(rect.left, rect.top);
+      else placePanel();
+    });
+
+    const setActive = (name) => {
+      library.querySelectorAll("[data-theme]").forEach((button) =>
+        button.classList.toggle("active", button.dataset.theme === name),
+      );
+    };
+    const clearDreamTheme = () => {
+      window.__CODEX_DREAM_SKIN_DISABLED__ = true;
+      window.__CODEX_DREAM_SKIN_STATE__?.cleanup?.();
+    };
+    const clearGenericTheme = () => {
+      document.documentElement.classList.remove("codex-library-generic-theme");
+      delete document.documentElement.dataset.codexCatalogTheme;
+      document.getElementById(genericStyleId)?.remove();
+      document.getElementById("codex-library-image-art")?.remove();
+    };
+    const applyTheme = (name) => {
+      if (name === "shiyali" && window.__CODEX_DREAM_SKIN_APPLY__) {
+        clearGenericTheme();
+        window.__CODEX_DREAM_SKIN_APPLY__?.();
+      } else if (name === "official") {
+        clearDreamTheme();
+        clearGenericTheme();
+      } else if (genericCss[name]) {
+        clearDreamTheme();
+        clearGenericTheme();
+        const genericStyle = document.createElement("style");
+        genericStyle.id = genericStyleId;
+        genericStyle.textContent = genericCss[name];
+        document.head.appendChild(genericStyle);
+        document.documentElement.classList.add("codex-library-generic-theme");
+        document.documentElement.dataset.codexCatalogTheme = name;
+      }
+      setActive(name);
+    };
+    trigger.addEventListener("click", (event) => {
+      if (suppressTriggerClick) { event.preventDefault(); return; }
+      library.classList.toggle("open");
+      placePanel();
+    });
+    library.querySelectorAll("[data-theme]").forEach((button) =>
+      button.addEventListener("click", () => applyTheme(button.dataset.theme)),
+    );
+    return { installed: true, replaced: Boolean(existing) };
+  })()`;
 }
 
 async function probeSession(session) {
@@ -337,7 +573,9 @@ async function removeFromSession(session) {
     const state = window.__CODEX_DREAM_SKIN_STATE__;
     if (state?.cleanup) return state.cleanup();
     document.documentElement?.classList.remove('codex-dream-skin');
-    document.documentElement?.style.removeProperty('--dream-art');
+    ['--dream-art', '--lisiya-portrait', '--lisiya-moment'].forEach((name) =>
+      document.documentElement?.style.removeProperty(name),
+    );
     document.querySelectorAll('.dream-home').forEach((node) => node.classList.remove('dream-home'));
     document.querySelectorAll('.dream-home-shell').forEach((node) => node.classList.remove('dream-home-shell'));
     document.getElementById('codex-dream-skin-style')?.remove();
@@ -437,14 +675,16 @@ async function capture(session, outputPath) {
 
 async function runOneShot(options) {
   const connected = await connectCodexTargets(options.port, options.timeoutMs);
-  const payload = (options.mode === "once" || options.reload) ? await loadPayload() : null;
+  const payload = (options.mode === "once" || options.reload)
+    ? await loadPayload()
+    : options.mode === "library" ? await loadThemeLibraryPayload() : null;
   const results = [];
   let screenshotCaptured = false;
   try {
     for (const { target, session, probe } of connected) {
       try {
         if (options.mode === "remove") await removeFromSession(session);
-        else if (options.mode === "once") await applyToSession(session, payload);
+        else if (options.mode === "once" || options.mode === "library") await applyToSession(session, payload);
         if (options.mode === "once") {
           await new Promise((resolve) => setTimeout(resolve, 850));
         }
@@ -453,7 +693,9 @@ async function runOneShot(options) {
           await new Promise((resolve) => setTimeout(resolve, 1600));
           if (options.mode !== "remove") await applyToSession(session, payload);
         }
-        const verified = options.mode === "remove"
+        const verified = options.mode === "library"
+          ? await session.evaluate("Boolean(document.getElementById('codex-manual-theme-library'))")
+          : options.mode === "remove"
           ? await verifyRemovedSession(session)
           : (options.reload || options.mode === "once" || options.mode === "verify")
             ? await waitForVerifiedSession(session, options.timeoutMs)
@@ -472,7 +714,7 @@ async function runOneShot(options) {
   }
   console.log(JSON.stringify({ mode: options.mode, port: options.port, targets: results }, null, 2));
   const failed = results.length === 0 || results.some((item) =>
-    options.mode === "remove" ? item.result !== true : !item.result?.pass);
+    options.mode === "library" || options.mode === "remove" ? item.result !== true : !item.result?.pass);
   if (failed) process.exitCode = 2;
 }
 
@@ -622,10 +864,17 @@ if (options.mode === "self-test") {
   }
   console.log(JSON.stringify({ pass: true, version: SKIN_VERSION, test: "loopback-cdp-validation" }));
 } else if (options.mode === "check-payload") {
-  const payload = await loadPayload();
-  if (payload.includes("__DREAM_CSS_JSON__") || payload.includes("__DREAM_ART_JSON__")) {
+  const personalPayload = await loadOptionalPersonalPayload();
+  const libraryPayload = await loadThemeLibraryPayload();
+  if ((personalPayload && (personalPayload.includes("__DREAM_CSS_JSON__") || personalPayload.includes("__DREAM_ARTS_JSON__") || personalPayload.includes("__DREAM_AUTO_APPLY__"))) ||
+      libraryPayload.includes("__DREAM_CSS_JSON__") || libraryPayload.includes("__DREAM_ARTS_JSON__") || libraryPayload.includes("__DREAM_AUTO_APPLY__")) {
     throw new Error("Payload placeholders were not fully replaced");
   }
-  console.log(JSON.stringify({ pass: true, version: SKIN_VERSION, payloadBytes: Buffer.byteLength(payload) }));
+  console.log(JSON.stringify({
+    pass: true,
+    version: SKIN_VERSION,
+    personalThemeAvailable: Boolean(personalPayload),
+    libraryPayloadBytes: Buffer.byteLength(libraryPayload),
+  }));
 } else if (options.mode === "watch") await runWatch(options);
 else await runOneShot(options);

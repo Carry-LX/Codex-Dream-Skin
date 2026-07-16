@@ -9,7 +9,12 @@ const windowsRoot = path.resolve(here, "..");
 const template = await fs.readFile(path.join(windowsRoot, "assets", "renderer-inject.js"), "utf8");
 const payload = template
   .replace("__DREAM_CSS_JSON__", JSON.stringify(".fixture { color: blue; }"))
-  .replace("__DREAM_ART_JSON__", JSON.stringify("data:image/png;base64,AA=="));
+  .replace("__DREAM_ARTS_JSON__", JSON.stringify([
+    "data:image/png;base64,AA==",
+    "data:image/png;base64,AA==",
+    "data:image/png;base64,AA==",
+  ]))
+  .replace("__DREAM_AUTO_APPLY__", "true");
 
 function createFixture({ shellPresent, staleSkin = false }) {
   const nodes = new Map();
@@ -126,19 +131,23 @@ const mainResult = vm.runInNewContext(payload, main.context);
 assert.equal(mainResult.installed, true);
 assert.equal(main.rootClasses.has("codex-dream-skin"), true);
 assert.equal(main.rootStyles.get("--dream-art"), 'url("blob:fixture")');
+assert.equal(main.rootStyles.get("--lisiya-portrait"), 'url("blob:fixture")');
+assert.equal(main.rootStyles.get("--lisiya-moment"), 'url("blob:fixture")');
 assert.equal(main.nodes.has("codex-dream-skin-style"), true);
 assert.equal(main.nodes.has("codex-dream-skin-chrome"), true);
 assert.equal(main.context.window.__CODEX_DREAM_SKIN_STATE__.cleanup(), true);
 assert.equal(main.rootClasses.has("codex-dream-skin"), false);
 assert.equal(main.nodes.has("codex-dream-skin-style"), false);
 assert.equal(main.nodes.has("codex-dream-skin-chrome"), false);
-assert.deepEqual(main.revokedUrls, ["blob:fixture"]);
+assert.deepEqual(main.revokedUrls, ["blob:fixture", "blob:fixture", "blob:fixture"]);
 
 const auxiliary = createFixture({ shellPresent: false, staleSkin: true });
 const auxiliaryResult = vm.runInNewContext(payload, auxiliary.context);
 assert.equal(auxiliaryResult.installed, true);
 assert.equal(auxiliary.rootClasses.has("codex-dream-skin"), false);
 assert.equal(auxiliary.rootStyles.has("--dream-art"), false);
+assert.equal(auxiliary.rootStyles.has("--lisiya-portrait"), false);
+assert.equal(auxiliary.rootStyles.has("--lisiya-moment"), false);
 assert.equal(auxiliary.nodes.has("codex-dream-skin-style"), false);
 assert.equal(auxiliary.nodes.has("codex-dream-skin-chrome"), false);
 

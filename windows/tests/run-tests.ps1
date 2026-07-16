@@ -316,6 +316,10 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Injector self-test failed.' }
   & $node.Path (Join-Path $PSScriptRoot 'renderer-inject.test.mjs')
   if ($LASTEXITCODE -ne 0) { throw 'Renderer auxiliary-window regression test failed.' }
+  & $node.Path (Join-Path $PSScriptRoot 'theme-catalog.test.mjs')
+  if ($LASTEXITCODE -ne 0) { throw 'Theme catalog regression test failed.' }
+  & $node.Path (Join-Path $PSScriptRoot 'image-theme-layout.test.mjs')
+  if ($LASTEXITCODE -ne 0) { throw 'Image-theme layout regression test failed.' }
 
   Write-Host 'PASS: config transactions, restore scoping, state safety, argument quoting, and loopback CDP validation.'
 } finally {

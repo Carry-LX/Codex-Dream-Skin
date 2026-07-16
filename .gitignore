@@ -8,3 +8,11 @@ README.preview.html
 docs/readme-preview.html
 release/
 runtime/
+work/
+
+# Personal image themes can contain private, licensed, or copyrighted artwork.
+windows/assets/lisiya-*.png
+windows/assets/personal/
+windows/assets/local-examples/*
+!windows/assets/local-examples/
+!windows/assets/local-examples/themes.example.json

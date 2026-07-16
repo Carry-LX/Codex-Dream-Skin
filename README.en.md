@@ -46,6 +46,27 @@
 
 One image, one mood. Real theme previews you can ship:
 
+### Theme Library in a real Codex window
+
+These three Windows screenshots show the current manual theme library. It does not modify the official installation. Character artwork is shown only as a locally supplied example and is not bundled as a redistributable theme asset.
+
+<p align="center">
+  <img src="docs/images/gallery/theme-library-lisiya-home.png" alt="Li Shiya sky-blue home theme" width="900"><br>
+  <sub>Li Shiya Sky: airy blue-and-white home layout</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery/theme-library-tom-jerry.png" alt="Tom and Jerry dual-image theme" width="900"><br>
+  <sub>Tom and Jerry: central art plus a horizontal sidebar image</sub>
+</p>
+
+<p align="center">
+  <img src="docs/images/gallery/theme-library-aqua-clean.png" alt="Clean aqua CSS sample theme" width="900"><br>
+  <sub>Clean Aqua: artwork-free CSS sample theme</sub>
+</p>
+
+Earlier gallery styles:
+
 <p align="center">
   <img src="docs/images/gallery/skin-01.jpg" alt="Pink Custom" width="900"><br>
   <sub>Pink Custom</sub>
@@ -92,6 +113,7 @@ One image, one mood. Real theme previews you can ship:
 - **Swappable art** — Drop in an image you like and it becomes your theme.
 - **Restorable** — One-click restore to the stock look.
 - **Safer path** — Local-loopback CDP inject only. No official binary or signature changes.
+- **Movable theme library** — Drag the floating theme chip anywhere in the window; its local position is remembered and the panel opens inward near an edge.
 
 ## Quick start
 
